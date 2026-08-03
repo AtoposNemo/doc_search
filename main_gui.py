@@ -32,10 +32,13 @@ else:
     _BUNDLE_DIR = _APP_DIR
 
 sys.path.insert(0, _BUNDLE_DIR)
-from search_docs import search_docs, get_match_excerpts
+from search_docs import (search_docs, get_match_excerpts,
+                         NoOfficeSoftwareError, NoExcelSoftwareError,
+                         SUPPORTED_EXTENSIONS,
+                         _create_office_app, _create_excel_app)
 
 # Allowed file extensions
-ALLOWED_EXTENSIONS = {'.doc', '.docx'}
+ALLOWED_EXTENSIONS = SUPPORTED_EXTENSIONS
 
 # === Blue color scheme ===
 COLOR_PRIMARY = '#2563eb'        # blue-600
@@ -150,7 +153,7 @@ class DocumentSearchApp:
         title_label.pack(pady=(18, 0))
 
         subtitle_label = tk.Label(header_frame,
-                                  text="搜索文件夹中的 .doc 和 .docx 文档内容",
+                                  text="搜索文件夹中的文档内容 (.doc/.docx/.txt/.csv/.xlsx/.xls/.pdf)",
                                   font=FONT_SUBTITLE,
                                   fg='#dbeafe', bg=COLOR_PRIMARY)
         subtitle_label.pack()
@@ -357,7 +360,7 @@ class DocumentSearchApp:
 
     def _search_worker(self, folder_path, search_str, case_sensitive):
         try:
-            # Pre-validate: check for non-doc/docx files
+            # Pre-validate: check for unsupported file types
             bad_files = self._validate_folder(folder_path)
             if bad_files:
                 self.root.after(0, self._validation_error,
@@ -367,6 +370,10 @@ class DocumentSearchApp:
             results = search_docs(folder_path, search_str, case_sensitive,
                                   progress_callback=self._on_search_progress)
             self.root.after(0, self._display_results, results, search_str)
+        except NoOfficeSoftwareError as e:
+            self.root.after(0, self._office_error, str(e))
+        except NoExcelSoftwareError as e:
+            self.root.after(0, self._office_error, str(e))
         except Exception as e:
             self.root.after(0, self._search_error, str(e))
 
@@ -382,7 +389,8 @@ class DocumentSearchApp:
 
         messagebox.showerror(
             "文件类型错误",
-            f'文件夹中包含 {len(bad_files)} 个非 .doc/.docx 文件，已终止搜索：\n\n{bad_list}')
+            f'文件夹中包含 {len(bad_files)} 个不支持的文件类型，已终止搜索。\n'
+            f'支持的格式：.doc .docx .txt .csv .xlsx .xls .pdf\n\n{bad_list}')
 
         # Show error in results area
         for widget in self.scrollable_frame.winfo_children():
@@ -394,12 +402,35 @@ class DocumentSearchApp:
         tk.Label(error_frame, text="❌", font=('Microsoft YaHei', 48),
                  fg='#dc2626', bg=COLOR_BG).pack()
         tk.Label(error_frame,
-                 text=f"文件夹包含 {len(bad_files)} 个非 .doc/.docx 文件",
+                 text=f"文件夹包含 {len(bad_files)} 个不支持的文件类型",
                  font=FONT_ERROR, fg='#dc2626', bg=COLOR_BG).pack(pady=(12, 0))
         tk.Label(error_frame,
-                 text="已终止搜索，请检查文件夹内容后重试",
+                 text="支持的格式：.doc .docx .txt .csv .xlsx .xls .pdf\n已终止搜索，请检查文件夹内容后重试",
                  font=FONT_SUBTITLE, fg=COLOR_SUBTITLE,
                  bg=COLOR_BG).pack(pady=(6, 0))
+
+    def _office_error(self, error_msg):
+        """Show error when required Office software (Word/Excel or WPS) is missing."""
+        self.searching = False
+        self.search_btn.configure(state=tk.NORMAL, text="开始搜索")
+
+        messagebox.showerror("缺少 Office 软件", error_msg)
+
+        for widget in self.scrollable_frame.winfo_children():
+            widget.destroy()
+
+        error_frame = tk.Frame(self.scrollable_frame, bg=COLOR_BG)
+        error_frame.pack(pady=80)
+
+        tk.Label(error_frame, text="⚠️", font=('Microsoft YaHei', 48),
+                 fg='#f59e0b', bg=COLOR_BG).pack()
+        tk.Label(error_frame,
+                 text="需要安装 Microsoft Office 或 WPS Office",
+                 font=FONT_ERROR, fg='#dc2626', bg=COLOR_BG).pack(pady=(12, 0))
+        tk.Label(error_frame,
+                 text=error_msg,
+                 font=FONT_SUBTITLE, fg=COLOR_SUBTITLE,
+                 bg=COLOR_BG, justify=tk.CENTER).pack(pady=(6, 0))
 
     def _search_error(self, error_msg):
         self.searching = False
@@ -534,11 +565,34 @@ class DocumentSearchApp:
                 self._render_preview(index, preview_frame)
 
     def _preview_worker(self, index, file_path, search_str, case_sensitive):
+        """Generate preview excerpts in a background thread.
+        Creates COM apps (Word/Excel) on demand for .doc/.xls files."""
+        ext = os.path.splitext(file_path)[1].lower()
+        word_app = None
+        excel_app = None
         try:
-            excerpts = get_match_excerpts(file_path, search_str, case_sensitive)
+            # Create COM instances only when needed
+            if ext == '.doc':
+                word_app = _create_office_app()
+            elif ext == '.xls':
+                excel_app = _create_excel_app()
+
+            excerpts = get_match_excerpts(file_path, search_str, case_sensitive,
+                                          word_app=word_app, excel_app=excel_app)
             self.root.after(0, self._preview_ready, index, excerpts)
         except Exception as e:
             self.root.after(0, self._preview_ready, index, [], str(e))
+        finally:
+            if word_app:
+                try:
+                    word_app.Quit()
+                except Exception:
+                    pass
+            if excel_app:
+                try:
+                    excel_app.Quit()
+                except Exception:
+                    pass
 
     def _preview_ready(self, index, excerpts, error=None):
         self.preview_cache[index] = (excerpts, error)

@@ -4,15 +4,21 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Protected build directory (Cython-compiled .pyd + PyInstaller artifacts)
+protected_build/
+
 # Packaged executable (too large for git)
 文档搜索.exe
 *.exe
 
-# Auto-generated PyInstaller spec (keep custom doc_search_gui.spec)
+# Auto-generated PyInstaller spec
 文档搜索.spec
 
 # User documents (not for version control)
 files/
+
+# Cython generated C files
+*.c
 
 # IDE / OS
 .vscode/
