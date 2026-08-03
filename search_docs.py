@@ -3,6 +3,72 @@ import sys
 import argparse
 
 
+class NoOfficeSoftwareError(Exception):
+    """Raised when neither Microsoft Word nor WPS Office is installed
+    but .doc files need to be read."""
+    pass
+
+
+# COM ProgIDs to try, in order of preference.
+# Word.Application  — Microsoft Word (primary)
+# KWPS.Application  — WPS Office (older versions)
+# wps.Application   — WPS Office (newer versions)
+_OFFICE_PROG_IDS = ('Word.Application', 'KWPS.Application', 'wps.Application')
+
+
+def _create_office_app():
+    """Create a COM office application instance.
+
+    Tries Microsoft Word first, then falls back to WPS Office.
+    Returns the application object configured for fast, hidden, read-only use.
+    Raises NoOfficeSoftwareError if neither Word nor WPS is installed.
+    """
+    import win32com.client
+
+    word_app = None
+    last_error = None
+    for prog_id in _OFFICE_PROG_IDS:
+        try:
+            word_app = win32com.client.DispatchEx(prog_id)
+            break
+        except Exception as e:
+            last_error = e
+            continue
+
+    if word_app is None:
+        raise NoOfficeSoftwareError(
+            "未检测到 Microsoft Word 或 WPS Office。\n"
+            "搜索 .doc 格式文件需要安装其中之一。\n"
+            "如仅搜索 .docx 文件则无需安装。"
+        )
+
+    # Configure for fast, hidden, non-intrusive operation.
+    # All settings are wrapped in try/except because WPS may not support
+    # some Word-specific properties.
+    try:
+        word_app.Visible = False
+    except Exception:
+        pass
+    try:
+        word_app.DisplayAlerts = 0  # wdAlertsNone
+    except Exception:
+        pass
+    try:
+        word_app.ScreenUpdating = False  # big speedup: no UI redraw
+    except Exception:
+        pass
+    try:
+        word_app.AutomationSecurity = 3  # disable macros
+    except Exception:
+        pass
+    try:
+        word_app.NormalTemplate.Saved = True  # skip "save Normal?" prompt
+    except Exception:
+        pass
+
+    return word_app
+
+
 def read_docx(file_path):
     from docx import Document
     try:
@@ -290,34 +356,18 @@ def search_docs(folder_path, search_str, case_sensitive=False, progress_callback
                 if result is not None:
                     results.append(result)
 
-    # --- .doc: sequential search with Word COM (slower, needs Word) ---
+    # --- .doc: sequential search with Office COM (Word or WPS, slower) ---
     word_app = None
     try:
         if doc_old_files:
             if sys.platform != 'win32':
                 print("Warning: .doc files require Windows with Microsoft Word "
-                      "installed.", file=sys.stderr)
+                      "or WPS Office installed.", file=sys.stderr)
                 print("Skipping .doc files...", file=sys.stderr)
             else:
-                import win32com.client
-                # DispatchEx creates a SEPARATE Word instance to avoid
-                # interfering with any Word documents the user has open.
-                # (Dispatch would attach to the existing user instance.)
-                word_app = win32com.client.DispatchEx("Word.Application")
-                word_app.Visible = False
-                word_app.DisplayAlerts = 0  # wdAlertsNone
-                try:
-                    word_app.ScreenUpdating = False  # big speedup: no UI redraw
-                except Exception:
-                    pass
-                try:
-                    word_app.AutomationSecurity = 3  # disable macros
-                except Exception:
-                    pass
-                try:
-                    word_app.NormalTemplate.Saved = True  # skip "save Normal?" prompt
-                except Exception:
-                    pass
+                # _create_office_app tries Word first, falls back to WPS.
+                # Raises NoOfficeSoftwareError if neither is installed.
+                word_app = _create_office_app()
 
             for file_path in doc_old_files:
                 _report_progress()

@@ -32,7 +32,7 @@ else:
     _BUNDLE_DIR = _APP_DIR
 
 sys.path.insert(0, _BUNDLE_DIR)
-from search_docs import search_docs, get_match_excerpts
+from search_docs import search_docs, get_match_excerpts, NoOfficeSoftwareError
 
 # Allowed file extensions
 ALLOWED_EXTENSIONS = {'.doc', '.docx'}
@@ -367,6 +367,8 @@ class DocumentSearchApp:
             results = search_docs(folder_path, search_str, case_sensitive,
                                   progress_callback=self._on_search_progress)
             self.root.after(0, self._display_results, results, search_str)
+        except NoOfficeSoftwareError as e:
+            self.root.after(0, self._office_error, str(e))
         except Exception as e:
             self.root.after(0, self._search_error, str(e))
 
@@ -400,6 +402,30 @@ class DocumentSearchApp:
                  text="已终止搜索，请检查文件夹内容后重试",
                  font=FONT_SUBTITLE, fg=COLOR_SUBTITLE,
                  bg=COLOR_BG).pack(pady=(6, 0))
+
+    def _office_error(self, error_msg):
+        """Show error when neither Word nor WPS is installed."""
+        self.searching = False
+        self.search_btn.configure(state=tk.NORMAL, text="开始搜索")
+
+        messagebox.showerror("缺少 Office 软件", error_msg)
+
+        for widget in self.scrollable_frame.winfo_children():
+            widget.destroy()
+
+        error_frame = tk.Frame(self.scrollable_frame, bg=COLOR_BG)
+        error_frame.pack(pady=80)
+
+        tk.Label(error_frame, text="⚠️", font=('Microsoft YaHei', 48),
+                 fg='#f59e0b', bg=COLOR_BG).pack()
+        tk.Label(error_frame,
+                 text="需要安装 Microsoft Word 或 WPS Office",
+                 font=FONT_ERROR, fg='#dc2626', bg=COLOR_BG).pack(pady=(12, 0))
+        tk.Label(error_frame,
+                 text="检测到 .doc 格式文件，但未找到 Word 或 WPS。\n"
+                      "请安装其中之一后重试，或仅搜索 .docx 文件。",
+                 font=FONT_SUBTITLE, fg=COLOR_SUBTITLE,
+                 bg=COLOR_BG, justify=tk.CENTER).pack(pady=(6, 0))
 
     def _search_error(self, error_msg):
         self.searching = False
