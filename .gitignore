@@ -1,0 +1,20 @@
+# Build artifacts
+build/
+__pycache__/
+*.pyc
+*.pyo
+
+# Packaged executable (too large for git)
+文档搜索.exe
+*.exe
+
+# Auto-generated PyInstaller spec (keep custom doc_search_gui.spec)
+文档搜索.spec
+
+# User documents (not for version control)
+files/
+
+# IDE / OS
+.vscode/
+Thumbs.db
+desktop.ini
